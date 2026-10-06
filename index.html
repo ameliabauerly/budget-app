@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Discretionary Budget</title>
+<style>
+:root{--bg:#f6f5f1;--card:#fff;--text:#1d1d1b;--muted:#77756e;--line:#e6e3da;--accent:#2f6f4f;--bad:#b3392f;--track:#e9e6dc;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#161715;--card:#202220;--text:#f0efe9;--muted:#9a978d;--line:#33352f;--accent:#6cc08f;--bad:#ee7b70;--track:#33352f}}
+:root[data-theme="dark"]{--bg:#161715;--card:#202220;--text:#f0efe9;--muted:#9a978d;--line:#33352f;--accent:#6cc08f;--bad:#ee7b70;--track:#33352f}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:480px;margin:0 auto;padding:20px 16px 40px}
+.nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+.nav h1{font-size:1rem;margin:0;font-weight:600}
+button{font:inherit;color:inherit;cursor:pointer}
+.ghost{background:none;border:1px solid var(--line);border-radius:8px;padding:6px 12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;margin-bottom:14px}
+.label{color:var(--muted);font-size:.8rem;text-transform:uppercase;letter-spacing:.06em}
+.big{font-size:3rem;font-weight:700;margin:4px 0 12px;font-variant-numeric:tabular-nums}
+.big.neg{color:var(--bad)}
+.track{height:8px;background:var(--track);border-radius:99px;overflow:hidden}
+.bar{height:100%;background:var(--accent);width:0;transition:width .25s}
+.bar.neg{background:var(--bad)}
+.meta{display:flex;justify-content:space-between;color:var(--muted);font-size:.85rem;margin-top:10px}
+.meta button{background:none;border:none;color:var(--accent);padding:0;text-decoration:underline}
+.add{display:grid;grid-template-columns:110px 1fr auto;gap:8px}
+input{font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;min-width:0}
+input:focus{outline:2px solid var(--accent);outline-offset:-1px}
+.go{background:var(--accent);color:var(--bg);border:none;border-radius:8px;padding:10px 16px;font-weight:600}
+ul{list-style:none;margin:0;padding:0}
+li{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
+li:last-child{border-bottom:none}
+li .n{flex:1;min-width:0}
+li .n small{display:block;color:var(--muted)}
+li .a{font-variant-numeric:tabular-nums;font-weight:600}
+li .x{background:none;border:none;color:var(--muted);font-size:1.2rem;padding:2px 6px}
+.empty{color:var(--muted);text-align:center;padding:12px 0}
+.setup{display:none}
+.setup.on{display:block}
+.setup .add{grid-template-columns:1fr auto}
+</style>
+</head>
+<body>
+<main>
+  <div class="nav">
+    <button class="ghost" id="prev" aria-label="Previous month">‹</button>
+    <h1 id="monthLabel"></h1>
+    <button class="ghost" id="next" aria-label="Next month">›</button>
+  </div>
+
+  <div class="card setup" id="setup">
+    <div class="label">Total for this month</div>
+    <p style="margin:6px 0 12px;color:var(--muted)">How much discretionary money do you have to spend?</p>
+    <div class="add">
+      <input id="budgetInput" type="number" inputmode="decimal" min="0" step="0.01" placeholder="1500">
+      <button class="go" id="setBudget">Set</button>
+    </div>
+  </div>
+
+  <div id="main">
+    <div class="card">
+      <div class="label">Available</div>
+      <div class="big" id="remaining">$0.00</div>
+      <div class="track"><div class="bar" id="bar"></div></div>
+      <div class="meta"><span id="spentTxt"></span><button id="editBudget"></button></div>
+    </div>
+
+    <div class="card">
+      <form class="add" id="addForm" onsubmit="return false">
+        <input id="amt" type="number" inputmode="decimal" min="0" step="0.01" placeholder="Amount" autocomplete="off">
+        <input id="note" type="text" placeholder="What for? (optional)" autocomplete="off">
+        <button class="go" id="addBtn" type="submit">Add</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <div class="label" style="margin-bottom:6px">Spending</div>
+      <ul id="list"></ul>
+    </div>
+  </div>
+</main>
+
+<script>
+(function(){
+  var KEY = "budget-app-v1";
+  var data = { months: {} };
+  try { var raw = localStorage.getItem(KEY); if (raw) data = JSON.parse(raw) || data; } catch(e){}
+  if (!data.months) data.months = {};
+
+  function save(){ try { localStorage.setItem(KEY, JSON.stringify(data)); } catch(e){} }
+  function keyFor(d){ return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0"); }
+  var cur = new Date(); cur.setDate(1);
+  function month(){ var k = keyFor(cur); return data.months[k] || null; }
+  function fmt(n){ var neg = n < 0; var s = Math.abs(n).toLocaleString(undefined,{style:"currency",currency:"USD"}); return neg ? "-" + s : s; }
+  function $(id){ return document.getElementById(id); }
+
+  function render(){
+    $("monthLabel").textContent = cur.toLocaleDateString(undefined,{month:"long",year:"numeric"});
+    var m = month();
+    var has = m && typeof m.budget === "number";
+    $("setup").classList.toggle("on", !has);
+    $("main").style.display = has ? "block" : "none";
+    if (!has) { $("budgetInput").value = ""; return; }
+    var spent = m.entries.reduce(function(s,e){ return s + e.amt; }, 0);
+    var left = m.budget - spent;
+    var r = $("remaining"); r.textContent = fmt(left); r.classList.toggle("neg", left < 0);
+    var pct = m.budget > 0 ? Math.min(100, Math.max(0, (left / m.budget) * 100)) : 0;
+    $("bar").style.width = pct + "%"; $("bar").classList.toggle("neg", left < 0);
+    $("spentTxt").textContent = fmt(spent) + " spent";
+    $("editBudget").textContent = "of " + fmt(m.budget) + " · edit";
+    var ul = $("list"); ul.innerHTML = "";
+    if (!m.entries.length) { var e = document.createElement("div"); e.className = "empty"; e.textContent = "Nothing spent yet."; ul.appendChild(e); }
+    m.entries.slice().reverse().forEach(function(en){
+      var li = document.createElement("li");
+      var n = document.createElement("div"); n.className = "n";
+      n.textContent = en.note || "Expense";
+      var sm = document.createElement("small");
+      sm.textContent = new Date(en.ts).toLocaleDateString(undefined,{month:"short",day:"numeric"});
+      n.appendChild(sm);
+      var a = document.createElement("div"); a.className = "a"; a.textContent = fmt(en.amt);
+      var x = document.createElement("button"); x.className = "x"; x.textContent = "×"; x.setAttribute("aria-label","Delete");
+      x.onclick = function(){ m.entries = m.entries.filter(function(z){ return z.id !== en.id; }); save(); render(); };
+      li.appendChild(n); li.appendChild(a); li.appendChild(x);
+      ul.appendChild(li);
+    });
+  }
+
+  function setBudget(v){
+    var n = parseFloat(v);
+    if (isNaN(n) || n < 0) return;
+    var k = keyFor(cur);
+    if (!data.months[k]) data.months[k] = { budget: n, entries: [] };
+    else data.months[k].budget = n;
+    save(); render();
+    if ($("amt")) $("amt").focus();
+  }
+
+  $("setBudget").onclick = function(){ setBudget($("budgetInput").value); };
+  $("budgetInput").addEventListener("keydown", function(e){ if (e.key === "Enter") setBudget(this.value); });
+  $("editBudget").onclick = function(){
+    var m = month(); if (!m) return;
+    var v = prompt("Total for this month:", m.budget);
+    if (v !== null) setBudget(v);
+  };
+
+  function add(){
+    var m = month(); if (!m) return;
+    var n = parseFloat($("amt").value);
+    if (isNaN(n) || n <= 0) { $("amt").focus(); return; }
+    m.entries.push({ id: Date.now() + Math.random(), amt: n, note: $("note").value.trim(), ts: Date.now() });
+    $("amt").value = ""; $("note").value = "";
+    save(); render(); $("amt").focus();
+  }
+  $("addForm").addEventListener("submit", function(e){ e.preventDefault(); add(); });
+  $("addBtn").onclick = function(e){ e.preventDefault(); add(); };
+
+  $("prev").onclick = function(){ cur.setMonth(cur.getMonth() - 1); render(); };
+  $("next").onclick = function(){ cur.setMonth(cur.getMonth() + 1); render(); };
+
+  render();
+})();
+</script>
+</body>
+</html>
